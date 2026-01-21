@@ -1,0 +1,314 @@
+-- DAX Measures for Data Quality Control Tower
+-- These measures power the Trust Score, Revenue at Risk, and reconciliation metrics
+-- in the Power BI Control Tower Dashboard
+
+-- =====================================================================
+-- TRUST SCORE MEASURES
+-- =====================================================================
+
+-- Overall Trust Score (Percentage)
+Trust Score % = 
+DIVIDE(
+    SUM(Fact_Audit_Log[valid_rows]),
+    SUM(Fact_Audit_Log[input_rows]),
+    0
+) * 100
+
+-- Trust Score Status (For conditional formatting)
+Trust Score Status = 
+VAR TrustScore = [Trust Score %]
+RETURN
+    SWITCH(
+        TRUE(),
+        TrustScore >= 98, "Excellent",
+        TrustScore >= 95, "Good",
+        TrustScore >= 90, "Warning",
+        "Critical"
+    )
+
+-- Trust Score Color (For gauge formatting)
+Trust Score Color = 
+VAR TrustScore = [Trust Score %]
+RETURN
+    SWITCH(
+        TRUE(),
+        TrustScore >= 98, "#00CC66",  -- Green
+        TrustScore >= 95, "#FFD700",  -- Yellow
+        TrustScore >= 90, "#FFA500",  -- Orange
+        "#FF4444"  -- Red
+    )
+
+-- =====================================================================
+-- REVENUE AT RISK MEASURES
+-- =====================================================================
+
+-- Revenue at Risk (Total quarantined sales)
+Revenue at Risk = 
+SUM(Fact_Quarantine[Sales_Dollars])
+
+-- Revenue at Risk % (As percentage of total potential revenue)
+Revenue at Risk % = 
+VAR QuarantinedRevenue = [Revenue at Risk]
+VAR TotalRevenue = SUM(Fact_Sales[Total_Sales])
+VAR PotentialRevenue = QuarantinedRevenue + TotalRevenue
+RETURN
+DIVIDE(QuarantinedRevenue, PotentialRevenue, 0) * 100
+
+-- Realized Revenue (Valid sales only)
+Realized Revenue = 
+SUM(Fact_Sales[Total_Sales])
+
+-- Total Potential Revenue (Realized + At Risk)
+Total Potential Revenue = 
+[Realized Revenue] + [Revenue at Risk]
+
+-- =====================================================================
+-- DATA QUALITY METRICS
+-- =====================================================================
+
+-- Total Records Processed
+Total Records Processed = 
+SUM(Fact_Audit_Log[input_rows])
+
+-- Valid Records Count
+Valid Records = 
+SUM(Fact_Audit_Log[valid_rows])
+
+-- Quarantined Records Count
+Quarantined Records = 
+SUM(Fact_Audit_Log[quarantine_rows])
+
+-- Quarantine Rate %
+Quarantine Rate % = 
+DIVIDE(
+    SUM(Fact_Audit_Log[quarantine_rows]),
+    SUM(Fact_Audit_Log[input_rows]),
+    0
+) * 100
+
+-- =====================================================================
+-- ERROR ANALYSIS MEASURES
+-- =====================================================================
+
+-- Count of Error Types
+Error Type Count = 
+DISTINCTCOUNT(Fact_Quarantine[Error_Details])
+
+-- Top Error Type
+Top Error Type = 
+TOPN(
+    1,
+    VALUES(Fact_Quarantine[Error_Details]),
+    CALCULATE(COUNTROWS(Fact_Quarantine)),
+    DESC
+)
+
+-- Critical Errors Count (CRITICAL severity)
+Critical Errors = 
+COUNTROWS(
+    FILTER(
+        Fact_Quarantine,
+        CONTAINSSTRING(Fact_Quarantine[Error_Details], "CRITICAL")
+    )
+)
+
+-- High Severity Errors Count
+High Severity Errors = 
+COUNTROWS(
+    FILTER(
+        Fact_Quarantine,
+        CONTAINSSTRING(Fact_Quarantine[Error_Details], "HIGH")
+    )
+)
+
+-- =====================================================================
+-- RECONCILIATION MEASURES
+-- =====================================================================
+
+-- Bronze to Silver Reconciliation (Should always be 100%)
+Bronze to Silver Reconciliation % = 
+VAR BronzeCount = SUM(Fact_Audit_Log[Bronze_Total])
+VAR SilverValid = SUM(Fact_Audit_Log[Silver_Valid])
+VAR SilverQuarantine = SUM(Fact_Audit_Log[Silver_Quarantine])
+VAR SilverTotal = SilverValid + SilverQuarantine
+RETURN
+DIVIDE(SilverTotal, BronzeCount, 0) * 100
+
+-- Reconciliation Status
+Reconciliation Status = 
+VAR ReconciliationPct = [Bronze to Silver Reconciliation %]
+RETURN
+IF(
+    ReconciliationPct = 100,
+    "✓ PASS",
+    "✗ FAIL - Data Loss Detected"
+)
+
+-- Data Loss Count (If any)
+Data Loss Count = 
+VAR BronzeCount = SUM(Fact_Audit_Log[Bronze_Total])
+VAR SilverValid = SUM(Fact_Audit_Log[Silver_Valid])
+VAR SilverQuarantine = SUM(Fact_Audit_Log[Silver_Quarantine])
+VAR SilverTotal = SilverValid + SilverQuarantine
+RETURN
+BronzeCount - SilverTotal
+
+-- =====================================================================
+-- TIME-BASED METRICS
+-- =====================================================================
+
+-- Data Freshness (Hours since last batch)
+Data Freshness Hours = 
+VAR LastBatchTime = MAX(Fact_Audit_Log[timestamp])
+VAR CurrentTime = NOW()
+RETURN
+DATEDIFF(LastBatchTime, CurrentTime, HOUR)
+
+-- Freshness Status
+Freshness Status = 
+VAR FreshnessHours = [Data Freshness Hours]
+RETURN
+SWITCH(
+    TRUE(),
+    FreshnessHours <= 24, "Fresh",
+    FreshnessHours <= 48, "Acceptable",
+    FreshnessHours <= 168, "Stale",
+    "Critical - Data Too Old"
+)
+
+-- Week Over Week Trust Score Change
+WoW Trust Score Change = 
+VAR CurrentWeekTrust = [Trust Score %]
+VAR PreviousWeekTrust = 
+    CALCULATE(
+        [Trust Score %],
+        DATEADD(Dim_Date[Date], -7, DAY)
+    )
+RETURN
+CurrentWeekTrust - PreviousWeekTrust
+
+-- =====================================================================
+-- BUSINESS IMPACT METRICS
+-- =====================================================================
+
+-- Lost Opportunity (Revenue at Risk as impact)
+Lost Opportunity $ = 
+[Revenue at Risk]
+
+-- Impacted Brands (Count of brands in quarantine)
+Impacted Brands = 
+DISTINCTCOUNT(Fact_Quarantine[UPC])
+
+-- Impacted Stores (Count of stores in quarantine)
+Impacted Stores = 
+DISTINCTCOUNT(Fact_Quarantine[Store_ID])
+
+-- Impacted Regions (Count of regions affected)
+Impacted Regions = 
+CALCULATE(
+    DISTINCTCOUNT(Dim_Store[Region]),
+    KEEPFILTERS(Fact_Quarantine)
+)
+
+-- =====================================================================
+-- TREND ANALYSIS MEASURES
+-- =====================================================================
+
+-- Trust Score Trend (7-day moving average)
+Trust Score 7D Avg = 
+AVERAGEX(
+    DATESINPERIOD(
+        Dim_Date[Date],
+        MAX(Dim_Date[Date]),
+        -7,
+        DAY
+    ),
+    [Trust Score %]
+)
+
+-- Quarantine Trend (30-day comparison)
+Quarantine Trend 30D = 
+VAR CurrentCount = [Quarantined Records]
+VAR Prior30DCount = 
+    CALCULATE(
+        [Quarantined Records],
+        DATEADD(Dim_Date[Date], -30, DAY)
+    )
+RETURN
+DIVIDE(
+    CurrentCount - Prior30DCount,
+    Prior30DCount,
+    0
+) * 100
+
+-- =====================================================================
+-- KPI CARDS MEASURES (For visual display)
+-- =====================================================================
+
+-- Trust Score Display (Formatted for KPI card)
+Trust Score Display = 
+FORMAT([Trust Score %], "0.00") & "%"
+
+-- Revenue at Risk Display (Formatted with currency)
+Revenue at Risk Display = 
+"$" & FORMAT([Revenue at Risk] / 1000, "#,##0") & "K"
+
+-- Quarantine Count Display
+Quarantine Count Display = 
+FORMAT([Quarantined Records], "#,##0")
+
+-- Data Quality Grade
+Data Quality Grade = 
+VAR TrustScore = [Trust Score %]
+RETURN
+SWITCH(
+    TRUE(),
+    TrustScore >= 99, "A+",
+    TrustScore >= 98, "A",
+    TrustScore >= 95, "B",
+    TrustScore >= 90, "C",
+    TrustScore >= 85, "D",
+    "F"
+)
+
+-- =====================================================================
+-- DIAGNOSTIC MEASURES (For Decomposition Tree)
+-- =====================================================================
+
+-- Quarantine Breakdown by Error Type
+Quarantine by Error = 
+CALCULATE(
+    COUNTROWS(Fact_Quarantine),
+    ALLEXCEPT(Fact_Quarantine, Fact_Quarantine[Error_Details])
+)
+
+-- Contribution to Total Quarantine %
+Contribution to Quarantine % = 
+DIVIDE(
+    COUNTROWS(Fact_Quarantine),
+    CALCULATE(
+        COUNTROWS(Fact_Quarantine),
+        ALL(Fact_Quarantine)
+    ),
+    0
+) * 100
+
+-- =====================================================================
+-- ALERT THRESHOLDS (For conditional formatting and alerts)
+-- =====================================================================
+
+-- Trust Score Alert (Returns TRUE if below threshold)
+Trust Score Alert = 
+[Trust Score %] < 95
+
+-- Revenue Risk Alert (Returns TRUE if above threshold)
+Revenue Risk Alert = 
+[Revenue at Risk] > 10000
+
+-- Critical Error Alert
+Critical Error Alert = 
+[Critical Errors] > 0
+
+-- Data Freshness Alert
+Data Freshness Alert = 
+[Data Freshness Hours] > 26

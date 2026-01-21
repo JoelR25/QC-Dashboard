@@ -1,0 +1,270 @@
+# Multi-Product Configuration for Control Tower
+# Defines products and their expected Circana extract files
+
+products:
+  
+  # Product 1: Snacks Category
+  product_snacks:
+    name: "Snacks"
+    description: "Salty snacks and chips category data from Circana"
+    num_extracts: 75
+    refresh_schedule: "Weekly - Monday 3 AM"
+    circana_feed: "Unify_Snacks_Weekly"
+    
+    adls_config:
+      container: "bronze"
+      base_path: "circana/product_snacks/weekly"
+      file_pattern: "snacks_extract_{extract_id}_{week_end}.csv"
+      
+    expected_files:
+      # Core extracts (always present)
+      - "snacks_sales_summary.csv"
+      - "snacks_store_performance.csv"
+      - "snacks_product_hierarchy.csv"
+      - "snacks_pricing.csv"
+      - "snacks_promotions.csv"
+      # Regional breakdowns (5 regions x 14 extracts = 70 files)
+      - "snacks_northeast_sales.csv"
+      - "snacks_northeast_units.csv"
+      - "snacks_northeast_dollars.csv"
+      # ... (75 files total)
+      
+    expected_schema:
+      sales:
+        - "UPC"
+        - "Store_ID"
+        - "Week_End"
+        - "Sales_Dollars"
+        - "Units_Sold"
+        - "Promo_Flag"
+      hierarchy:
+        - "UPC"
+        - "Brand"
+        - "Category"
+        - "Sub_Category"
+        
+    validation_rules:
+      - check_file_exists
+      - check_file_freshness
+      - check_file_size
+      - validate_schema
+      - check_row_count
+      
+    alert_thresholds:
+      max_missing_files: 5  # Alert if more than 5 files missing
+      max_age_hours: 26     # Alert if data older than 26 hours
+      min_file_size_mb: 0.5
+      
+  # Product 2: Beverages Category  
+  product_beverages:
+    name: "Beverages"
+    description: "Beverage category data from Circana"
+    num_extracts: 150
+    refresh_schedule: "Weekly - Monday 3 AM"
+    circana_feed: "Unify_Beverages_Weekly"
+    
+    adls_config:
+      container: "bronze"
+      base_path: "circana/product_beverages/weekly"
+      file_pattern: "bev_extract_{extract_id}_{week_end}.csv"
+      
+    expected_files:
+      # Beverages has more granular data = 150 files
+      - "bev_sales_summary.csv"
+      - "bev_carbonated_sales.csv"
+      - "bev_non_carbonated_sales.csv"
+      - "bev_energy_drinks.csv"
+      - "bev_water.csv"
+      - "bev_juice.csv"
+      # ... (150 files total)
+      
+    expected_schema:
+      sales:
+        - "UPC"
+        - "Store_ID"
+        - "Week_End"
+        - "Sales_Dollars"
+        - "Units_Sold"
+        - "Volume_Liters"
+        
+    validation_rules:
+      - check_file_exists
+      - check_file_freshness
+      - check_file_size
+      - validate_schema
+      - check_row_count
+      
+    alert_thresholds:
+      max_missing_files: 10
+      max_age_hours: 26
+      min_file_size_mb: 0.5
+      
+  # Product 3: Frozen Foods
+  product_frozen:
+    name: "Frozen Foods"
+    description: "Frozen foods category data from Circana"
+    num_extracts: 60
+    refresh_schedule: "Weekly - Monday 3 AM"
+    circana_feed: "Unify_Frozen_Weekly"
+    
+    adls_config:
+      container: "bronze"
+      base_path: "circana/product_frozen/weekly"
+      file_pattern: "frozen_extract_{extract_id}_{week_end}.csv"
+      
+    expected_files:
+      # Frozen has fewer subcategories = 60 files
+      - "frozen_sales_summary.csv"
+      - "frozen_meals.csv"
+      - "frozen_pizza.csv"
+      - "frozen_vegetables.csv"
+      - "frozen_desserts.csv"
+      # ... (60 files total)
+      
+    expected_schema:
+      sales:
+        - "UPC"
+        - "Store_ID"
+        - "Week_End"
+        - "Sales_Dollars"
+        - "Units_Sold"
+        
+    validation_rules:
+      - check_file_exists
+      - check_file_freshness
+      - check_file_size
+      - validate_schema
+      
+    alert_thresholds:
+      max_missing_files: 3
+      max_age_hours: 26
+      min_file_size_mb: 0.5
+
+# Global configuration
+global_config:
+  
+  # ADLS Connection
+  adls:
+    storage_account: "${ADLS_STORAGE_ACCOUNT}"
+    container_bronze: "bronze"
+    container_silver: "silver"
+    container_gold: "gold"
+    
+  # Databricks Connection
+  databricks:
+    workspace_url: "${DBX_WORKSPACE_URL}"
+    token: "${DBX_TOKEN}"
+    catalog_bronze: "bronze_catalog"
+    catalog_silver: "silver_catalog"
+    catalog_gold: "gold_catalog"
+    
+  # Validation Schedule
+  schedule:
+    day_of_week: "Monday"
+    time: "06:00 AM"
+    timezone: "America/New_York"
+    
+  # Alert Configuration
+  alerts:
+    email_recipients:
+      - "dataops@company.com"
+      - "analytics-team@company.com"
+    teams_webhook: "${TEAMS_WEBHOOK_URL}"
+    severity_levels:
+      critical: ["missing_files", "schema_mismatch", "data_loss"]
+      high: ["stale_data", "low_trust_score"]
+      medium: ["file_size_variance", "null_values"]
+      
+  # Power BI App Configuration
+  powerbi:
+    workspace_id: "${PBI_WORKSPACE_ID}"
+    app_name: "Data Quality Control Tower"
+    app_description: "Multi-product data quality monitoring and reconciliation"
+    refresh_schedule: "Daily at 7 AM"
+    row_level_security: true
+    allowed_groups:
+      - "Analytics Team"
+      - "Business Analysts"
+      - "Data Stewards"
+
+# Monday Morning Check Configuration
+monday_check:
+  description: "Automated BA confidence check - replaces manual validation"
+  
+  checks_to_run:
+    # Layer 1: ADLS Blob Validation
+    - name: "ADLS File Existence"
+      type: "adls_file_check"
+      severity: "CRITICAL"
+      action: "alert_if_fail"
+      
+    - name: "ADLS File Freshness"
+      type: "adls_freshness_check"
+      severity: "CRITICAL"
+      action: "alert_if_fail"
+      
+    - name: "ADLS File Size"
+      type: "adls_size_check"
+      severity: "WARNING"
+      action: "log_if_fail"
+      
+    # Layer 2: Databricks Bronze Validation
+    - name: "Bronze Ingestion Complete"
+      type: "bronze_row_count_check"
+      severity: "CRITICAL"
+      action: "alert_if_fail"
+      
+    - name: "Bronze to ADLS Reconciliation"
+      type: "reconciliation_check"
+      severity: "CRITICAL"
+      action: "block_if_fail"
+      
+    # Layer 3: Databricks Silver Validation
+    - name: "Silver Trust Score"
+      type: "trust_score_check"
+      threshold: 95.0
+      severity: "HIGH"
+      action: "alert_if_below_threshold"
+      
+    - name: "Silver Quarantine Analysis"
+      type: "quarantine_pattern_check"
+      severity: "HIGH"
+      action: "report"
+      
+    # Layer 4: Databricks Gold Validation
+    - name: "Gold Aggregation Accuracy"
+      type: "gold_reconciliation_check"
+      severity: "HIGH"
+      action: "alert_if_fail"
+      
+    # Layer 5: Power BI Semantic Model Validation
+    - name: "PBI Refresh Status"
+      type: "pbi_refresh_check"
+      severity: "CRITICAL"
+      action: "alert_if_fail"
+      
+    - name: "PBI Row Count Validation"
+      type: "pbi_to_gold_reconciliation"
+      severity: "HIGH"
+      action: "alert_if_fail"
+      
+  report_generation:
+    format: "HTML"
+    include_sections:
+      - "Executive Summary"
+      - "Trust Score by Product"
+      - "Files Missing (if any)"
+      - "Quarantine Analysis"
+      - "Reconciliation Status"
+      - "Action Items"
+    email_to:
+      - "business-analysts@company.com"
+      - "data-stewards@company.com"
+    subject: "Monday Data Quality Check - {date}"
+    
+  success_criteria:
+    - all_files_present: true
+    - all_files_fresh: true
+    - trust_score_above: 95.0
+    - no_critical_errors: true
+    - reconciliation_pass: true

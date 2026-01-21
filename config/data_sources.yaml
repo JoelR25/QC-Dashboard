@@ -1,0 +1,114 @@
+# Data Sources Configuration for QC Dashboard
+# This file defines all data sources in the pipeline
+
+data_sources:
+  # Source: Circana (Unify)
+  circana:
+    type: "external_api"
+    name: "Circana Unify"
+    description: "Source data from Circana/Unify platform"
+    refresh_schedule: "weekly"
+    connection:
+      endpoint: "${CIRCANA_ENDPOINT}"
+      auth_type: "oauth2"
+    validation_rules:
+      - check_file_arrival
+      - check_schema_consistency
+      - check_record_count
+    
+  # Layer 1: ADLS Blob Storage
+  adls_bronze:
+    type: "azure_blob"
+    name: "ADLS Bronze Layer"
+    description: "Raw data landing zone in Azure Data Lake Storage"
+    connection:
+      storage_account: "${ADLS_STORAGE_ACCOUNT}"
+      container: "bronze"
+      path: "circana/"
+    validation_rules:
+      - check_file_exists
+      - check_file_size
+      - check_file_timestamp
+      - validate_json_structure
+      - compare_with_source
+    expected_latency_hours: 2
+    
+  # Layer 2: Databricks Medallion - Bronze
+  dbx_bronze:
+    type: "databricks_delta"
+    name: "DBX Bronze Table"
+    description: "Databricks Bronze layer (raw ingestion)"
+    connection:
+      workspace_url: "${DBX_WORKSPACE_URL}"
+      catalog: "bronze_catalog"
+      schema: "circana_raw"
+      table: "source_data"
+    validation_rules:
+      - check_table_exists
+      - check_row_count
+      - check_partition_completeness
+      - validate_against_adls
+    
+  # Layer 3: Databricks Medallion - Silver
+  dbx_silver:
+    type: "databricks_delta"
+    name: "DBX Silver Table"
+    description: "Databricks Silver layer (cleaned and validated)"
+    connection:
+      workspace_url: "${DBX_WORKSPACE_URL}"
+      catalog: "silver_catalog"
+      schema: "circana_clean"
+      table: "processed_data"
+    validation_rules:
+      - check_data_quality_metrics
+      - validate_transformations
+      - check_null_percentages
+      - compare_with_bronze
+    
+  # Layer 4: Databricks Medallion - Gold
+  dbx_gold:
+    type: "databricks_delta"
+    name: "DBX Gold Table"
+    description: "Databricks Gold layer (business-ready aggregated data)"
+    connection:
+      workspace_url: "${DBX_WORKSPACE_URL}"
+      catalog: "gold_catalog"
+      schema: "circana_analytics"
+      table: "kpi_metrics"
+    validation_rules:
+      - validate_aggregations
+      - check_business_rules
+      - compare_with_silver
+      
+  # Layer 5: Power BI Semantic Model
+  pbi_semantic_model:
+    type: "power_bi"
+    name: "Power BI Semantic Model"
+    description: "Power BI semantic model for end-user consumption"
+    connection:
+      workspace_id: "${PBI_WORKSPACE_ID}"
+      dataset_id: "${PBI_DATASET_ID}"
+    validation_rules:
+      - check_refresh_status
+      - validate_row_counts
+      - check_measure_calculations
+      - compare_with_gold_layer
+    refresh_schedule: "weekly"
+
+# Data lineage path
+data_lineage:
+  path:
+    - circana
+    - adls_bronze
+    - dbx_bronze
+    - dbx_silver
+    - dbx_gold
+    - pbi_semantic_model
+  
+# Alert thresholds
+alert_thresholds:
+  row_count_variance_percent: 5  # Alert if variance > 5%
+  data_latency_hours: 4  # Alert if data delayed > 4 hours
+  null_percentage: 10  # Alert if null values > 10%
+  schema_change: true  # Always alert on schema changes
+  missing_files: true  # Always alert on missing files

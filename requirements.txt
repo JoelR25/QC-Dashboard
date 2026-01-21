@@ -1,0 +1,48 @@
+# Requirements for QC Dashboard / Data Quality Control Tower
+
+## Python Dependencies
+faker==22.0.0
+pyyaml==6.0.1
+pandas==2.1.4
+pyspark==3.5.0  # For local testing; Use cluster version in Databricks
+python-dotenv==1.0.0
+azure-storage-blob==12.19.0  # For ADLS connectivity
+databricks-sdk==0.18.0  # For Databricks API
+requests==2.31.0
+
+## Development Dependencies
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+
+## Optional: For local Spark development
+findspark==2.0.1
+
+## Power BI
+# Power BI Desktop (latest version)
+# Download from: https://aka.ms/pbidesktop
+
+## Databricks Requirements
+# - Databricks Runtime 13.3 LTS or higher
+# - Delta Lake support
+# - Python 3.10+
+# - Access to Databricks FileStore for CSV export
+
+## Azure Requirements (for production)
+# - Azure Data Lake Storage Gen2
+# - Azure Databricks workspace
+# - Unity Catalog (optional, for enterprise)
+# - Azure Key Vault (for secrets management)
+
+## Minimum System Requirements
+# - CPU: 4+ cores
+# - RAM: 8GB+ (16GB recommended)
+# - Disk: 10GB free space
+# - OS: Windows 10/11, macOS 10.14+, or Linux
+
+## Browser Requirements (for Databricks Community Edition)
+# - Chrome 90+
+# - Firefox 88+
+# - Edge 90+
