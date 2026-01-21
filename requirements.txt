@@ -1,0 +1,17 @@
+# Data Quality Control Tower - Python Dependencies
+
+# Data Generation & Manipulation
+faker==22.0.0
+pandas==2.0.3
+numpy==1.24.3
+
+# PySpark (for local testing - Databricks provides this)
+# pyspark==3.4.1  # Uncomment for local development
+
+# Visualization & Export
+matplotlib==3.7.2
+seaborn==0.12.2
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3

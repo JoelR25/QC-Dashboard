@@ -1,0 +1,599 @@
+# Power BI App: Data Quality Control Tower
+
+## DAX Measures for QC Dashboard
+
+### 1. Trust Score Measures
+
+```dax
+// ====================
+// TRUST SCORE METRICS
+// ====================
+
+// Overall Trust Score (Latest Week)
+Trust Score % = 
+VAR LatestWeek = MAX('Reconciliation'[week_end_date])
+VAR LatestData = 
+    FILTER(
+        'Reconciliation',
+        'Reconciliation'[week_end_date] = LatestWeek &&
+        'Reconciliation'[layer_name] = "Silver"
+    )
+RETURN
+    AVERAGEX(LatestData, 'Reconciliation'[trust_score_pct])
+
+// Trust Score by Product
+Trust Score by Product = 
+CALCULATE(
+    AVERAGE('Reconciliation'[trust_score_pct]),
+    'Reconciliation'[layer_name] = "Silver"
+)
+
+// Trust Score Trend (13-week moving average)
+Trust Score Trend = 
+CALCULATE(
+    AVERAGE('Reconciliation'[trust_score_pct]),
+    'Reconciliation'[layer_name] = "Silver",
+    DATESINPERIOD(
+        'Reconciliation'[week_end_date],
+        MAX('Reconciliation'[week_end_date]),
+        -13,
+        WEEK
+    )
+)
+
+// Trust Score Color (for conditional formatting)
+Trust Score Color = 
+SWITCH(
+    TRUE(),
+    [Trust Score %] >= 98, "Green",
+    [Trust Score %] >= 95, "Yellow",
+    "Red"
+)
+```
+
+### 2. Reconciliation Metrics
+
+```dax
+// =======================
+// RECONCILIATION METRICS
+// =======================
+
+// Total Variance %
+Total Variance % = 
+AVERAGE('Reconciliation'[variance_pct])
+
+// Files Missing Count
+Files Missing = 
+SUMX(
+    'Reconciliation',
+    'Reconciliation'[file_count_expected] - 'Reconciliation'[file_count_actual]
+)
+
+// Rows Missing Count
+Rows Missing = 
+SUMX(
+    'Reconciliation',
+    'Reconciliation'[row_count_expected] - 'Reconciliation'[row_count_actual]
+)
+
+// Reconciliation Status Summary
+Status Summary = 
+CONCATENATEX(
+    VALUES('Reconciliation'[status]),
+    'Reconciliation'[status] & ": " & 
+    COUNTROWS(
+        FILTER(
+            'Reconciliation',
+            'Reconciliation'[status] = EARLIER('Reconciliation'[status])
+        )
+    ),
+    ", ",
+    'Reconciliation'[status],
+    ASC
+)
+
+// Layer Health Score
+Layer Health Score = 
+VAR ErrorCount = 
+    CALCULATE(
+        COUNTROWS('Reconciliation'),
+        'Reconciliation'[status] = "ERROR"
+    )
+VAR WarningCount = 
+    CALCULATE(
+        COUNTROWS('Reconciliation'),
+        'Reconciliation'[status] = "WARNING"
+    )
+VAR TotalCount = COUNTROWS('Reconciliation')
+RETURN
+    DIVIDE(
+        TotalCount - ErrorCount - (WarningCount * 0.5),
+        TotalCount
+    ) * 100
+```
+
+### 3. File Monitoring Metrics
+
+```dax
+// ======================
+// FILE MONITORING
+// ======================
+
+// File Delivery Rate %
+File Delivery Rate % = 
+DIVIDE(
+    SUM('Reconciliation'[file_count_actual]),
+    SUM('Reconciliation'[file_count_expected]),
+    0
+) * 100
+
+// Average File Latency (hours)
+Avg File Latency = 
+AVERAGE('Reconciliation'[latency_hours])
+
+// Files Delivered On-Time %
+Files On-Time % = 
+VAR OnTimeThreshold = 2  // 2 hours SLA
+VAR OnTimeCount = 
+    CALCULATE(
+        COUNTROWS('Reconciliation'),
+        'Reconciliation'[latency_hours] <= OnTimeThreshold
+    )
+VAR TotalFiles = COUNTROWS('Reconciliation')
+RETURN
+    DIVIDE(OnTimeCount, TotalFiles, 0) * 100
+
+// File Size Anomaly Detection
+File Size Anomaly Flag = 
+VAR CurrentSize = MAX('FileMetadata'[file_size_mb])
+VAR AvgSize = 
+    CALCULATE(
+        AVERAGE('FileMetadata'[file_size_mb]),
+        ALLEXCEPT('FileMetadata', 'FileMetadata'[file_name_pattern]),
+        'FileMetadata'[week_end_date] < MAX('FileMetadata'[week_end_date])
+    )
+VAR StdDev = 
+    CALCULATE(
+        STDEV.P('FileMetadata'[file_size_mb]),
+        ALLEXCEPT('FileMetadata', 'FileMetadata'[file_name_pattern])
+    )
+RETURN
+    IF(
+        CurrentSize > AvgSize + (2 * StdDev) || 
+        CurrentSize < AvgSize - (2 * StdDev),
+        "⚠️ Anomaly",
+        "✅ Normal"
+    )
+```
+
+### 4. Quarantine Analysis Metrics
+
+```dax
+// ======================
+// QUARANTINE METRICS
+// ======================
+
+// Quarantine Row Count
+Quarantine Rows = 
+SUM('Quarantine'[row_count])
+
+// Quarantine Rate %
+Quarantine Rate % = 
+DIVIDE(
+    [Quarantine Rows],
+    [Total Input Rows],
+    0
+) * 100
+
+// Revenue at Risk (Quarantine)
+Revenue at Risk = 
+SUMX(
+    'Quarantine',
+    ABS('Quarantine'[sales_dollars])
+)
+
+// Top Error Reason
+Top Error Reason = 
+FIRSTNONBLANK(
+    TOPN(
+        1,
+        VALUES('Quarantine'[error_reason]),
+        CALCULATE(COUNTROWS('Quarantine'))
+    ),
+    1
+)
+
+// Error Reason Count
+Error Reason Count = 
+CALCULATE(
+    COUNTROWS('Quarantine'),
+    ALLEXCEPT('Quarantine', 'Quarantine'[error_reason])
+)
+
+// Quarantine Trend
+Quarantine Trend = 
+CALCULATE(
+    [Quarantine Rows],
+    DATESINPERIOD(
+        'Quarantine'[week_end_date],
+        MAX('Quarantine'[week_end_date]),
+        -13,
+        WEEK
+    )
+)
+```
+
+### 5. Cross-Layer Lineage Metrics
+
+```dax
+// ==========================
+// DATA LINEAGE TRACKING
+// ==========================
+
+// Source to ADLS Success Rate
+Source to ADLS % = 
+VAR SourceLayer = 
+    CALCULATE(
+        SUM('Reconciliation'[file_count_expected]),
+        'Reconciliation'[layer_name] = "Source"
+    )
+VAR ADLSLayer = 
+    CALCULATE(
+        SUM('Reconciliation'[file_count_actual]),
+        'Reconciliation'[layer_name] = "ADLS_Landing"
+    )
+RETURN
+    DIVIDE(ADLSLayer, SourceLayer, 0) * 100
+
+// ADLS to Bronze Success Rate
+ADLS to Bronze % = 
+VAR ADLSRows = 
+    CALCULATE(
+        SUM('Reconciliation'[row_count_actual]),
+        'Reconciliation'[layer_name] = "ADLS_Landing"
+    )
+VAR BronzeRows = 
+    CALCULATE(
+        SUM('Reconciliation'[row_count_actual]),
+        'Reconciliation'[layer_name] = "Bronze"
+    )
+RETURN
+    DIVIDE(BronzeRows, ADLSRows, 0) * 100
+
+// Bronze to Silver Success Rate
+Bronze to Silver % = 
+VAR BronzeRows = 
+    CALCULATE(
+        SUM('Reconciliation'[row_count_actual]),
+        'Reconciliation'[layer_name] = "Bronze"
+    )
+VAR SilverRows = 
+    CALCULATE(
+        SUM('Reconciliation'[row_count_actual]),
+        'Reconciliation'[layer_name] = "Silver"
+    )
+RETURN
+    DIVIDE(SilverRows, BronzeRows, 0) * 100
+
+// Silver to Gold Success Rate
+Silver to Gold % = 
+VAR SilverSum = 
+    CALCULATE(
+        SUM('Reconciliation'[row_count_actual]),
+        'Reconciliation'[layer_name] = "Silver"
+    )
+VAR GoldSum = 
+    CALCULATE(
+        SUM('Reconciliation'[row_count_actual]),
+        'Reconciliation'[layer_name] = "Gold"
+    )
+RETURN
+    DIVIDE(GoldSum, SilverSum, 0) * 100
+
+// End-to-End Success Rate
+End-to-End Success % = 
+VAR SourceCount = 
+    CALCULATE(
+        SUM('Reconciliation'[file_count_expected]),
+        'Reconciliation'[layer_name] = "Source"
+    )
+VAR GoldCount = 
+    CALCULATE(
+        SUM('Reconciliation'[row_count_actual]),
+        'Reconciliation'[layer_name] = "Gold"
+    )
+RETURN
+    DIVIDE(GoldCount, SourceCount, 0) * 100
+```
+
+### 6. SLA & Performance Metrics
+
+```dax
+// =====================
+// SLA TRACKING
+// =====================
+
+// Data Freshness (hours since last update)
+Data Freshness Hours = 
+DATEDIFF(
+    MAX('Reconciliation'[data_timestamp]),
+    NOW(),
+    HOUR
+)
+
+// SLA Met (24-hour delivery)
+SLA Met = 
+IF([Data Freshness Hours] <= 24, "✅ Met", "❌ Missed")
+
+// Pipeline Duration (ADLS to PBI)
+Pipeline Duration Hours = 
+VAR ADLSTime = 
+    CALCULATE(
+        MIN('Reconciliation'[check_timestamp]),
+        'Reconciliation'[layer_name] = "ADLS_Landing"
+    )
+VAR PBITime = 
+    CALCULATE(
+        MAX('Reconciliation'[check_timestamp]),
+        'Reconciliation'[layer_name] = "PowerBI_SemanticModel"
+    )
+RETURN
+    DATEDIFF(ADLSTime, PBITime, HOUR)
+
+// Weekly Comparison
+Week-over-Week Change = 
+VAR CurrentWeek = [Trust Score %]
+VAR PreviousWeek = 
+    CALCULATE(
+        [Trust Score %],
+        DATEADD('Reconciliation'[week_end_date], -1, WEEK)
+    )
+RETURN
+    CurrentWeek - PreviousWeek
+
+// Product Comparison (Variance from Average)
+Product Variance from Avg = 
+[Trust Score by Product] - 
+CALCULATE(
+    [Trust Score by Product],
+    ALL('Reconciliation'[product_name])
+)
+```
+
+### 7. Alert & Notification Measures
+
+```dax
+// ========================
+// ALERTING & NOTIFICATIONS
+// ========================
+
+// Critical Issues Count
+Critical Issues = 
+CALCULATE(
+    COUNTROWS('Reconciliation'),
+    'Reconciliation'[status] = "ERROR"
+)
+
+// Warning Issues Count
+Warning Issues = 
+CALCULATE(
+    COUNTROWS('Reconciliation'),
+    'Reconciliation'[status] = "WARNING"
+)
+
+// Alert Priority Score
+Alert Priority = 
+VAR ErrorWeight = [Critical Issues] * 10
+VAR WarningWeight = [Warning Issues] * 3
+VAR TrustPenalty = IF([Trust Score %] < 95, 20, 0)
+RETURN
+    ErrorWeight + WarningWeight + TrustPenalty
+
+// Issue Summary for Email
+Issue Summary = 
+"Critical: " & [Critical Issues] & " | " &
+"Warnings: " & [Warning Issues] & " | " &
+"Trust Score: " & FORMAT([Trust Score %], "0.0%")
+
+// Recommended Action
+Recommended Action = 
+SWITCH(
+    TRUE(),
+    [Critical Issues] > 0, "🚨 Immediate action required - Check error details",
+    [Trust Score %] < 95, "⚠️ Investigate quarantine records",
+    [Warning Issues] > 0, "📋 Review warnings during next sync",
+    "✅ No action required - Monitor trends"
+)
+```
+
+---
+
+## Data Model Configuration
+
+### Tables and Relationships
+
+```
+Reconciliation (Fact)
+├── product_name → Dim_Product[product_name] (Many-to-One)
+├── week_end_date → Dim_Date[Date] (Many-to-One)
+├── layer_name → Dim_Layer[layer_name] (Many-to-One)
+└── status → Dim_Status[status] (Many-to-One)
+
+Quarantine (Fact)
+├── product_name → Dim_Product[product_name] (Many-to-One)
+├── week_end_date → Dim_Date[Date] (Many-to-One)
+└── error_reason → Dim_ErrorReason[error_reason] (Many-to-One)
+
+AuditLog (Fact)
+├── batch_id → Dim_Batch[batch_id] (Many-to-One)
+└── timestamp → Dim_Date[Date] (Many-to-One)
+```
+
+### Dimension Tables (Create in Power Query)
+
+**Dim_Product**
+```
+Product_Name | Product_Category | Extract_Count | Owner
+Nielsen_Retail | Syndicated | 150 | Jane Doe
+Circana_Grocery | Syndicated | 85 | John Smith
+Unify_Convenience | Syndicated | 60 | Alice Johnson
+```
+
+**Dim_Layer**
+```
+Layer_Name | Layer_Order | Description
+Source | 1 | Circana Unify Extract
+ADLS_Landing | 2 | Azure Data Lake Storage
+Bronze | 3 | Raw Ingestion
+Silver | 4 | Quality Validated
+Gold | 5 | Aggregated Analytics
+PowerBI_SemanticModel | 6 | Semantic Model
+```
+
+**Dim_ErrorReason**
+```
+Error_Code | Error_Reason | Category | Severity
+ERR_001 | upc_exists | Master Data | High
+ERR_002 | store_exists | Master Data | High
+ERR_003 | sales_positive | Data Validation | Medium
+ERR_004 | units_positive | Data Validation | Medium
+ERR_005 | price_reasonable | Business Rule | Low
+```
+
+---
+
+## Power BI App Pages Configuration
+
+### Page 1: Executive Dashboard
+
+**Visuals:**
+1. **Card**: Trust Score % (Large, Top Left)
+2. **Card**: Critical Issues Count
+3. **Card**: Files Missing
+4. **Card**: Revenue at Risk
+5. **Line Chart**: Trust Score Trend (13 weeks)
+6. **Bar Chart**: Trust Score by Product
+7. **Matrix**: Layer Health Summary
+8. **Slicer**: Week End Date (Top)
+9. **Slicer**: Product Name (Top)
+
+**Interactions**: All visuals cross-filter
+
+---
+
+### Page 2: File Monitoring
+
+**Visuals:**
+1. **Table**: File delivery status by product
+   - Columns: Product, Expected Files, Actual Files, Missing, Latency Hours, Status
+2. **Waterfall Chart**: File count flow (Expected → Received → Processed)
+3. **Scatter Plot**: File size vs. latency (anomaly detection)
+4. **Gauge**: File Delivery Rate %
+5. **Timeline**: File arrival times vs. SLA
+
+---
+
+### Page 3: Reconciliation Lineage
+
+**Visuals:**
+1. **Sankey Diagram**: Data flow across layers
+   - Source → ADLS → Bronze → Silver → Gold → PBI
+2. **Funnel Chart**: Row count drop-off by layer
+3. **Matrix**: Reconciliation results by Product x Layer
+4. **Column Chart**: Variance % by layer
+5. **Decomposition Tree**: Drill-down into errors
+
+**Drill-through**: Right-click any layer → Go to "Layer Details" page
+
+---
+
+### Page 4: Quarantine Analysis
+
+**Visuals:**
+1. **Treemap**: Quarantine rows by Error Reason
+2. **Table**: Top 100 quarantine records
+3. **Bar Chart**: Error reason count by product
+4. **Line Chart**: Quarantine trend over time
+5. **Card**: Revenue at Risk
+6. **Decomposition Tree**: Error Reason → Product → Region
+
+---
+
+### Page 5: Alerts & Actions
+
+**Visuals:**
+1. **Table**: Active issues requiring attention
+   - Columns: Priority, Product, Layer, Error Details, Recommended Action
+2. **Card**: Alert Priority Score
+3. **Donut Chart**: Issue distribution (Critical/Warning/OK)
+4. **Text Box**: Issue Summary for Copy-Paste to Email
+
+---
+
+## Power BI App Publish Settings
+
+### Workspace Configuration
+- **Name**: `DataQuality_ControlTower_Prod`
+- **License**: Premium Per User (PPU) or Premium Capacity
+- **Access**: 
+  - Admins: Data Engineering Team
+  - Members: Business Analysts, Product Owners
+  - Viewers: Executive Leadership
+
+### App Configuration
+- **Name**: "Data Quality Control Tower"
+- **Description**: "Automated QA dashboard for Circana data pipeline monitoring and reconciliation across ADLS, Databricks, and Power BI"
+- **Logo**: Upload company logo
+- **Theme Color**: Navy Blue (#002F6C)
+- **Navigation**:
+  - Executive Dashboard (Home)
+  - File Monitoring
+  - Reconciliation Lineage
+  - Quarantine Analysis
+  - Alerts & Actions
+
+### Refresh Schedule
+- **Frequency**: Daily at 6:00 AM (after pipeline completion)
+- **Time Zone**: Eastern Time (ET)
+- **Notification**: Email on failure to `data-engineering@company.com`
+- **Gateway**: Use Enterprise Gateway for secure connectivity
+
+---
+
+## Mobile Layout Optimization
+
+For each page, create a mobile-optimized layout:
+- **Card visuals**: Stack vertically
+- **Charts**: Simplified with fewer data points
+- **Tables**: Show only top 10 rows
+- **Slicers**: Convert to drop-downs
+
+---
+
+## Row-Level Security (RLS)
+
+```dax
+// Users only see their assigned products
+
+[Product_Name] = USERPRINCIPALNAME() // Map user to product in lookup table
+
+// OR for manager-level access
+
+'Dim_Product'[Owner] = USERPRINCIPALNAME()
+```
+
+---
+
+## Next: Deployment Checklist
+
+1. ✅ Create workspace in Power BI Service
+2. ✅ Publish datasets from Power BI Desktop
+3. ✅ Configure data source credentials (Databricks)
+4. ✅ Set up scheduled refresh
+5. ✅ Create app from workspace
+6. ✅ Assign permissions to user groups
+7. ✅ Test mobile layout
+8. ✅ Share app link with stakeholders
+9. ✅ Schedule Monday morning email automation
+10. ✅ Monitor usage analytics
+
