@@ -1,0 +1,180 @@
+# Validation Rules Configuration
+# Define specific validation checks for data quality and reconciliation
+
+validation_rules:
+  
+  # File-level validations
+  file_validations:
+    check_file_exists:
+      name: "File Existence Check"
+      description: "Verify that expected files are present"
+      severity: "critical"
+      action: "alert"
+      
+    check_file_size:
+      name: "File Size Validation"
+      description: "Check if file size is within expected range"
+      severity: "warning"
+      min_size_mb: 1
+      max_variance_percent: 50
+      
+    check_file_timestamp:
+      name: "File Freshness Check"
+      description: "Verify file modification timestamp is recent"
+      severity: "critical"
+      max_age_hours: 26  # Weekly refresh + 2 hour buffer
+      
+  # Schema validations
+  schema_validations:
+    check_schema_consistency:
+      name: "Schema Consistency Check"
+      description: "Validate schema matches expected structure"
+      severity: "critical"
+      action: "block"
+      
+    validate_json_structure:
+      name: "JSON Structure Validation"
+      description: "Validate JSON files have correct structure"
+      severity: "critical"
+      
+  # Data quality validations
+  data_quality_validations:
+    check_row_count:
+      name: "Row Count Validation"
+      description: "Check if row count is within expected range"
+      severity: "warning"
+      min_variance_percent: -5
+      max_variance_percent: 5
+      
+    check_null_percentages:
+      name: "Null Value Check"
+      description: "Check percentage of null values in critical columns"
+      severity: "warning"
+      critical_columns:
+        - "product_id"
+        - "date"
+        - "sales_amount"
+      max_null_percent: 1
+      
+    check_data_quality_metrics:
+      name: "Data Quality Score"
+      description: "Calculate overall data quality score"
+      severity: "warning"
+      metrics:
+        - completeness
+        - accuracy
+        - consistency
+        - timeliness
+      min_score: 95
+      
+  # Reconciliation validations
+  reconciliation_validations:
+    compare_with_source:
+      name: "Source-to-Target Reconciliation"
+      description: "Compare record counts between source and target"
+      severity: "critical"
+      tolerance_percent: 0.1
+      
+    validate_against_adls:
+      name: "ADLS-to-DBX Reconciliation"
+      description: "Validate Databricks data against ADLS source"
+      severity: "critical"
+      checks:
+        - row_count_match
+        - key_column_match
+        - sum_amount_match
+        
+    compare_with_bronze:
+      name: "Bronze-to-Silver Reconciliation"
+      description: "Validate transformations from Bronze to Silver"
+      severity: "warning"
+      expected_row_reduction: true
+      max_reduction_percent: 10
+      
+    compare_with_silver:
+      name: "Silver-to-Gold Reconciliation"
+      description: "Validate aggregations from Silver to Gold"
+      severity: "warning"
+      validate_aggregates: true
+      
+    compare_with_gold_layer:
+      name: "Gold-to-PBI Reconciliation"
+      description: "Validate Power BI semantic model against Gold layer"
+      severity: "critical"
+      checks:
+        - total_row_count
+        - key_metrics_match
+        - date_range_match
+      
+  # Transformation validations
+  transformation_validations:
+    validate_transformations:
+      name: "Data Transformation Validation"
+      description: "Validate data transformations are applied correctly"
+      severity: "warning"
+      checks:
+        - data_type_conversions
+        - calculated_columns
+        - derived_metrics
+        
+    validate_aggregations:
+      name: "Aggregation Validation"
+      description: "Validate aggregated data is calculated correctly"
+      severity: "critical"
+      aggregate_functions:
+        - sum
+        - count
+        - average
+        - min_max
+        
+  # Business rule validations
+  business_rule_validations:
+    check_business_rules:
+      name: "Business Rules Validation"
+      description: "Validate data meets business logic requirements"
+      severity: "critical"
+      rules:
+        - name: "positive_sales"
+          description: "Sales amounts should be positive"
+          condition: "sales_amount >= 0"
+        - name: "valid_dates"
+          description: "Dates should be within valid range"
+          condition: "date >= '2020-01-01' AND date <= CURRENT_DATE"
+        - name: "valid_product_ids"
+          description: "Product IDs should match master list"
+          condition: "product_id IN (SELECT product_id FROM master.products)"
+          
+  # Pipeline health validations
+  pipeline_validations:
+    check_partition_completeness:
+      name: "Partition Completeness Check"
+      description: "Verify all expected partitions are present"
+      severity: "critical"
+      partition_column: "date"
+      
+    check_table_exists:
+      name: "Table Existence Check"
+      description: "Verify table exists in database"
+      severity: "critical"
+      
+    check_refresh_status:
+      name: "Refresh Status Check"
+      description: "Check Power BI dataset refresh status"
+      severity: "critical"
+      max_failed_refreshes: 0
+      
+    validate_row_counts:
+      name: "Historical Row Count Validation"
+      description: "Compare current row counts with historical averages"
+      severity: "warning"
+      lookback_periods: 4  # Compare with last 4 weeks
+      variance_threshold: 20
+      
+    check_measure_calculations:
+      name: "Measure Calculation Validation"
+      description: "Validate DAX measures calculate correctly"
+      severity: "warning"
+      sample_measures:
+        - "Total Sales"
+        - "YTD Sales"
+        - "Sales Growth %"
